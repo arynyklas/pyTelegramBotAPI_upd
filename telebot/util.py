@@ -13,7 +13,7 @@ import logging
 import six
 from six import string_types
 import queue as Queue
-import PIL
+from PIL import Image
 from io import BytesIO
 
 
@@ -163,13 +163,13 @@ def is_bytes(var):
     return isinstance(var, bytes)
 
 def is_pil_image(var):
-    return isinstance(var, PIL.Image.Image)
+    return isinstance(var, Image.Image)
 
-def pil_image_to_file(image):
+def pil_image_to_bytes(image):
     photoBuffer = BytesIO()
     image.save(photoBuffer, format='JPEG')
 
-    return img_byte_arr.getvalue()
+    return photoBuffer.getvalue()
 
 def is_command(text):
     """

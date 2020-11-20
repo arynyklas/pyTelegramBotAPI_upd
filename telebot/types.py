@@ -167,6 +167,22 @@ class WebhookInfo(JsonDeserializable):
         self.max_connections = max_connections
         self.allowed_updates = allowed_updates
 
+class UserProfilePhotos(JsonDeserializable):
+    @classmethod
+    def de_json(cls, json_string):
+        if not json_string: # TODO ALL REPLACE
+            return None
+
+        obj = cls.check_json(json_string)
+        total_count = obj['total_count']
+        photos = PhotoSize.de_json(obj['photos'])
+
+        return cls(total_count, photos)
+
+    def __init__(self, total_count, photos):
+        self.total_count = total_count
+        self.photos = photos
+
 class User(JsonDeserializable, Dictionaryable, JsonSerializable):
     @classmethod
     def de_json(cls, json_string):
@@ -267,7 +283,7 @@ class Chat(JsonDeserializable):
     def __init__(
         self, id, type, title=None, username=None, first_name=None,
         last_name=None, all_members_are_administrators=None,
-        photo=None, description=None, invite_link=None,
+        photo=None, bio=None, description=None, invite_link=None,
         pinned_message=None, permissions=None, slow_mode_delay=None,
         sticker_set_name=None, can_set_sticker_set=None
     ):
@@ -527,10 +543,6 @@ class Message(JsonDeserializable):
             "text_link": "<a href=\"{url}\">{text}</a>"
  	    }
 
-        if hasattr(self, "custom_subs"):
-            for key, value in self.custom_subs.items():
-                _subs[key] = value
-
         utf16_text = text.encode("utf-16-le")
         html_text = ""
 
@@ -668,9 +680,15 @@ class Audio(JsonDeserializable):
         mime_type = obj.get('mime_type')
         file_size = obj.get('file_size')
 
-        return cls(file_id, duration, performer, title, file_name, mime_type, file_size)
+        return cls(
+            file_id, duration, performer, title, file_name,
+            mime_type, file_size
+        )
 
-    def __init__(self, file_id, duration, performer=None, title=None, mime_type=None, file_size=None):
+    def __init__(
+        self, file_id, duration, performer=None, title=None,
+        file_name=None, mime_type=None, file_size=None
+    ):
         self.file_id = file_id
         self.duration = duration
         self.performer = performer
@@ -743,9 +761,15 @@ class Video(JsonDeserializable):
         mime_type = obj.get('mime_type')
         file_size = obj.get('file_size')
 
-        return cls(file_id, width, height, duration, thumb, file_name, mime_type, file_size)
+        return cls(
+            file_id, width, height, duration, thumb, file_name,
+            mime_type, file_size
+        )
 
-    def __init__(self, file_id, width, height, duration, thumb=None, mime_type=None, file_size=None):
+    def __init__(
+        self, file_id, width, height, duration, thumb=None,
+        file_name=None, mime_type=None, file_size=None
+    ):
         self.file_id = file_id
         self.width = width
         self.height = height
@@ -2544,7 +2568,7 @@ class InputMedia(Dictionaryable, JsonSerializable):
 class InputMediaPhoto(InputMedia):
     def __init__(self, media, caption=None, parse_mode=None):
         if util.is_pil_image(media):
-            media = util.pil_image_to_file(media)
+            media = util.pil_image_to_bytes(media)
     
         super(InputMediaPhoto, self).__init__(
             type="photo", media=media, caption=caption, parse_mode=parse_mode

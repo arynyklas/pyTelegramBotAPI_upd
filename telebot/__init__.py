@@ -117,9 +117,6 @@ class TeleBot:
         if not self.reply_backend:
             self.reply_backend = MemoryHandlerBackend()
 
-        self.middleware_handlers = {}
-        self.middleware_end_handlers = {}
-
         self.message_handlers = []
         self.edited_message_handlers = []
         self.channel_post_handlers = []
@@ -145,25 +142,12 @@ class TeleBot:
             'poll': [],
         }
 
-        self.typed_middleware_end_handlers = {
-            'message': [],
-            'edited_message': [],
-            'channel_post': [],
-            'edited_channel_post': [],
-            'inline_query': [],
-            'chosen_inline_result': [],
-            'callback_query': [],
-            'shipping_query': [],
-            'pre_checkout_query': [],
-            'poll': [],
-        }
-
         if self.threaded:
             self.worker_pool = util.ThreadPool(num_threads=num_threads)
 
     def set_webhook(
         self, url=None, certificate=None, ip_address=None, max_connections=None,
-        allowed_updates=None, drop_pending_updatse=None
+        allowed_updates=None, drop_pending_updates=None
     ):
         return apihelper.set_webhook(
             self.token, url, certificate, max_connections, allowed_updates, drop_pending_updates
@@ -256,67 +240,68 @@ class TeleBot:
         new_poll_answers = []
 
         for update in updates:
-            self.process_middlewares(update)
-            self.process_end_middlewares(update)
+            args = self.process_middlewares(update)
 
             if update.update_id > self.last_update_id:
                 self.last_update_id = update.update_id
             if update.message:
-                new_messages.append(update.message)
+                new_messages.append([update.message, args])
             if update.edited_message:
-                new_edited_messages.append(update.edited_message)
+                new_edited_messages.append([update.edited_message, args])
             if update.channel_post:
-                new_channel_posts.append(update.channel_post)
+                new_channel_posts.append([update.channel_post, args])
             if update.edited_channel_post:
-                new_edited_channel_posts.append(update.edited_channel_post)
+                new_edited_channel_posts.append([update.edited_channel_post, args])
             if update.inline_query:
-                new_inline_querys.append(update.inline_query)
+                new_inline_querys.append([update.inline_query, args])
             if update.chosen_inline_result:
-                new_chosen_inline_results.append(update.chosen_inline_result)
+                new_chosen_inline_results.append([update.chosen_inline_result, args])
             if update.callback_query:
-                new_callback_querys.append(update.callback_query)
+                new_callback_querys.append([update.callback_query, args])
             if update.shipping_query:
-                new_shipping_querys.append(update.shipping_query)
+                new_shipping_querys.append([update.shipping_query, args])
             if update.pre_checkout_query:
-                new_pre_checkout_querys.append(update.pre_checkout_query)
+                new_pre_checkout_querys.append([update.pre_checkout_query, args])
             if update.poll:
-                new_polls.append(update.poll)
+                new_polls.append([update.poll, args])
             if update.poll_answer:
-                new_poll_answers.append(update.poll_answer)
+                new_poll_answers.append([update.poll_answer, args])
 
         logger.debug('Received {0} new updates'.format(len(updates)))
 
-        if len(new_messages) > 0:
+        if not new_messages:
             self.process_new_messages(new_messages)
-        if len(new_edited_messages) > 0:
+        if not new_edited_messages:
             self.process_new_edited_messages(new_edited_messages)
-        if len(new_channel_posts) > 0:
+        if not new_channel_posts:
             self.process_new_channel_posts(new_channel_posts)
-        if len(new_edited_channel_posts) > 0:
+        if not new_edited_channel_posts:
             self.process_new_edited_channel_posts(new_edited_channel_posts)
-        if len(new_inline_querys) > 0:
+        if not new_inline_querys:
             self.process_new_inline_query(new_inline_querys)
-        if len(new_chosen_inline_results) > 0:
+        if not new_chosen_inline_results:
             self.process_new_chosen_inline_query(new_chosen_inline_results)
-        if len(new_callback_querys) > 0:
+        if not new_callback_querys:
             self.process_new_callback_query(new_callback_querys)
-        if len(new_shipping_querys) > 0:
+        if not new_shipping_querys:
             self.process_new_shipping_query(new_shipping_querys)
-        if len(new_pre_checkout_querys) > 0:
+        if not new_pre_checkout_querys:
             self.process_new_pre_checkout_query(new_pre_checkout_querys)
-        if len(new_polls) > 0:
+        if not new_polls:
             self.process_new_poll(new_polls)
-        if len(new_poll_answers) > 0:
+        if not new_poll_answers:
             self.process_new_poll_answer(new_poll_answers)
 
     def process_new_messages(self, new_messages):
-        self._notify_next_handlers(new_messages)
-        self._notify_reply_handlers(new_messages)
-        self.__notify_update(new_messages)
-        self._notify_command_handlers(self.message_handlers, new_messages)
+        for i in new_messages:
+            self._notify_next_handlers(i)
+            self._notify_reply_handlers(i)
+            self.__notify_update(i)
+            self._notify_command_handlers(self.message_handlers, i)
 
     def process_new_edited_messages(self, edited_message):
-        self._notify_command_handlers(self.edited_message_handlers, edited_message)
+        for i in edited_message:
+            self._notify_command_handlers(self.edited_message_handlers, i)
 
     def process_new_channel_posts(self, channel_post):
         self._notify_command_handlers(self.channel_post_handlers, channel_post)
@@ -350,22 +335,10 @@ class TeleBot:
             for update_type, middlewares in self.typed_middleware_handlers.items():
                 if getattr(update, update_type) is not None:
                     for typed_middleware_handler in middlewares:
-                        typed_middleware_handler(self, getattr(update, update_type))
+                        return typed_middleware_handler(getattr(update, update_type))
 
-            if len(self.middleware_handlers) > 0:
-                for middleware_handler in self.middleware_handlers:
-                    middleware_handler(self, update)
-
-    def process_end_middlewares(self, update):
-        if len(self.typed_middleware_end_handlers.items()) > 0:
-            for update_type, end_middlewares in self.typed_middleware_end_handlers.items():
-                if getattr(update, update_type) is not None:
-                    for typed_middleware_end_handler in end_middlewares:
-                        typed_middleware_end_handler(self, getattr(update, update_type))
-
-            if len(self.middleware_handlers) > 0:
-                for middleware_end_handler in self.middleware_handlers:
-                    middleware_end_handler(self, update)
+        else:
+            return update
 
     def __notify_update(self, new_messages):
         for listener in self.update_listener:
@@ -416,7 +389,7 @@ class TeleBot:
             self.worker_pool.exception_event
         )
 
-        while not self.__stop_polling.wait(interval):
+        while not self.__stop_polling.wait():
             or_event.clear()
 
             try:
@@ -458,7 +431,7 @@ class TeleBot:
         self.__stop_polling.clear()
         error_interval = 0.25
 
-        while not self.__stop_polling.wait(interval):
+        while not self.__stop_polling.wait():
             try:
                 self.__retrieve_updates(timeout)
                 error_interval = 0.25
@@ -510,11 +483,14 @@ class TeleBot:
 
     def get_me(self):
         result = apihelper.get_me(self.token)
-
         return types.User.de_json(result)
 
     def get_file(self, file_id):
-        return types.File.de_json(apihelper.get_file(self.token, file_id))
+        return types.File.de_json(
+            apihelper.get_file(
+                self.token, file_id
+            )
+        )
 
     def get_file_url(self, file_id):
         return apihelper.get_file_url(self.token, file_id)
@@ -1846,7 +1822,7 @@ class TeleBot:
         """
 
         for message in new_messages:
-            if hasattr(message, "reply_to_message") and message.reply_to_message is not None:
+            if hasattr(message, "reply_to_message") and message.reply_to_message:
                 handlers = self.reply_backend.get_handlers(message.reply_to_message.message_id)
 
                 for handler in handlers:
@@ -1969,38 +1945,6 @@ class TeleBot:
         bot = TeleBot('TOKEN')
 
         # Print post message text before entering to any post_channel handlers
-        @bot.middleware_end_handler(update_types=['channel_post', 'edited_channel_post'])
-        def print_channel_post_text(bot_instance, channel_post):
-            print(channel_post.text)
-
-        # Print update id before entering to any handlers
-        @bot.middleware_end_handler()
-        def print_channel_post_text(bot_instance, update):
-            print(update.update_id)
-
-        :param update_types: Optional list of update types that can be passed into the middleware handler.
-        """
-
-        def decorator(handler):
-            self.add_middleware_handler(handler, update_types)
-
-            return handler
-
-        return decorator
-
-    def middleware_end_handler(self, update_types=None):
-        """
-        Middleware handler decorator.
-
-        This decorator can be used to decorate functions that must be handled as middlewares before entering any other
-        message handlers
-        But, be careful and check type of the update inside the handler if more than one update_type is given
-
-        Example:
-
-        bot = TeleBot('TOKEN')
-
-        # Print post message text before entering to any post_channel handlers
         @bot.middleware_handler(update_types=['channel_post', 'edited_channel_post'])
         def print_channel_post_text(bot_instance, channel_post):
             print(channel_post.text)
@@ -2014,7 +1958,7 @@ class TeleBot:
         """
 
         def decorator(handler):
-            self.add_middleware_end_handler(handler, update_types)
+            self.add_middleware_handler(handler, update_types)
 
             return handler
 
@@ -2035,22 +1979,6 @@ class TeleBot:
 
         else:
             self.typed_middleware_handlers['message'].append(handler)
-
-    def add_middleware_end_handler(self, handler, update_types=None):
-        """
-        Add middleware handler
-
-        :param handler:
-        :param update_types:
-        :return:
-        """
-
-        if update_types:
-            for update_type in update_types:
-                self.typed_middleware_end_handlers[update_type].append(handler)
-
-        else:
-            self.typed_middleware_end_handlers['message'].append(handler)
 
     def message_handler(self, commands=None, regexp=None, func=None, content_types=None, **kwargs):
         """
@@ -2083,11 +2011,12 @@ class TeleBot:
         :param content_types: This commands' supported content types. Must be a list. Defaults to ['text'].
         """
 
-        if content_types is None:
+        if not content_types:
             content_types = ["text"]
 
         def decorator(handler):
-            handler_dict = self._build_handler_dict(handler,
+            handler_dict = self._build_handler_dict(
+                handler,
                 commands=commands,
                 regexp=regexp,
                 func=func,
@@ -2123,7 +2052,7 @@ class TeleBot:
         :return:
         """
 
-        if content_types is None:
+        if not content_types:
             content_types = ["text"]
 
         def decorator(handler):
@@ -2427,7 +2356,7 @@ class TeleBot:
 
         self.poll_answer_handlers.append(handler_dict)
 
-    def _test_message_handler(self, message_handler, message):
+    def _test_message_handler(self, message_handler, *args):
         """
         Test message handler
 
@@ -2435,6 +2364,8 @@ class TeleBot:
         :param message:
         :return:
         """
+
+        message = args[0][0]
 
         for message_filter, filter_value in six.iteritems(message_handler['filters']):
             if filter_value is None:
@@ -2465,7 +2396,7 @@ class TeleBot:
 
         return test_cases.get(message_filter, lambda msg: False)(message)
 
-    def _notify_command_handlers(self, handlers, new_messages):
+    def _notify_command_handlers(self, handlers, message):
         """
         Notifies command handlers
 
@@ -2474,12 +2405,11 @@ class TeleBot:
         :return:
         """
 
-        for message in new_messages:
-            for message_handler in handlers:
-                if self._test_message_handler(message_handler, message):
-                    self._exec_task(message_handler['function'], message)
+        for message_handler in handlers:
+            if self._test_message_handler(message_handler, message):
+                self._exec_task(message_handler['function'], message)
 
-                    break
+                break
 
 
 class AsyncTeleBot(TeleBot):

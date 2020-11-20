@@ -3,13 +3,17 @@
 
 import time
 import json
+
 import requests
-from requests.packages.urllib3 import fields
+from urllib3 import fields
 from requests.exceptions import HTTPError, ConnectionError, ProxyError, Timeout, ConnectTimeout
 
 import telebot
 from telebot import types
 from telebot import util
+from telebot import exceptions
+from exceptions import HTTPStatus
+
 import logging
 
 
@@ -137,21 +141,40 @@ def _check_result(method_name, result):
     :return: The result parsed to a JSON dictionary.
     """
 
-    try:
-        result_json = result.json()
+    print(result.json())
 
-    except:
-        if result.status_code != 200:
-            raise ApiHTTPException(method_name, result)
+    result_json = result.json()
 
-        else:
-            raise ApiInvalidJSONException(method_name, result)
+    description = result_json.get('description')
 
-    else:    
-        if not result_json['ok']:
-            raise ApiTelegramException(method_name, result, result_json)
+    if result_json.get('parameters'):
+        parameters = result_json['parameters']
+    else:
+        parameters = {}
 
-        return result_json
+    status_code = result.status_code
+
+    if result_json['ok'] == True:
+        return result_json.get('result')
+    elif parameters.get('retry_after'):
+        raise exceptions.RetryAfter(result_json.get('retry_after'))
+    elif parameters.get('migrate_to_chat_id'):
+        raise exceptions.MigrateToChat(parameters['migrate_to_chat_id'])
+    elif status_code == HTTPStatus.BAD_REQUEST:
+        exceptions.BadRequest.detect(description)
+    elif status_code == HTTPStatus.NOT_FOUND:
+        exceptions.NotFound.detect(description)
+    elif status_code == HTTPStatus.CONFLICT:
+        exceptions.ConflictError.detect(description)
+    elif status_code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
+        exceptions.Unauthorized.detect(description)
+    elif status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
+        raise exceptions.NetworkError('File too large for uploading.')
+    elif status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+        if 'restart' in description:
+            raise exceptions.RestartingTelegram()
+
+        raise exceptions.TelegramAPIError(description)
 
 def log_out(token):
     method_url = 'logOut'
@@ -446,20 +469,12 @@ def send_photo(
     payload = {'chat_id': chat_id}
     files = None
 
-    if util.is_string(photo):
-        payload['photo'] = photo
-    elif util.is_pil_image(photo):
-        payload['photo'] = util.pil_image_to_file(photo)
+    if util.is_pil_image(photo):
+        payload['photo'] = util.pil_image_to_bytes(photo)
     elif util.is_bytes(photo):
         payload['photo'] = photo
     else:
-        try:
-            with open(photo, 'rb') as f:
-                payload['photo'] = f.read()
-
-        except IOError:
-            logger.debug(f"File not found! {photo}")
-            return
+        files = {'photo': photo}
 
     if caption:
         payload['caption'] = caption
@@ -1049,7 +1064,7 @@ def set_chat_photo(token, chat_id, photo):
         payload['photo'] = photo
 
     elif util.is_pil_image(photo):
-        files = {'photo': util.pil_image_to_file(photo)}
+        files = {'photo': util.pil_image_to_bytes(photo)}
 
     else:
         files = {'photo': photo}
@@ -1109,9 +1124,12 @@ def unpin_chat_message(token, chat_id, message_id=None):
 
     return _make_request(token, method_url, params=payload, method='post')
 
-def unpin_chat_message(token, chat_id):
+def unpin_all_chat_messages(token, chat_id, message_id=None):
     method_url = 'unpinAllChatMessages'
     payload = {'chat_id': chat_id}
+
+    if message_id:
+        payload['message_id'] = message_id
 
     return _make_request(token, method_url, params=payload, method='post')
 
